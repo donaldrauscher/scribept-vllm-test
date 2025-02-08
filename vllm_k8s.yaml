@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-server
+  template:
+    metadata:
+      labels:
+        app: vllm-server
+        ai.gke.io/model: medical-scribe
+        ai.gke.io/inference-server: vllm
+    spec:
+      containers:
+      - name: inference-server
+        image: vllm/vllm-openai:latest
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            vllm serve $(MODEL_ID) \
+            --trust-remote-code \
+            --dtype auto \
+            --max-model-len 2048 \
+            --tensor-parallel-size 2 \
+            --api-key $(API_KEY)
+        resources:
+          requests:
+            cpu: "4"
+            memory: "30Gi"
+            ephemeral-storage: "30Gi"
+            nvidia.com/gpu: "2"
+          limits:
+            cpu: "4"
+            memory: "30Gi"
+            ephemeral-storage: "30Gi"
+            nvidia.com/gpu: "2"
+        env:
+        - name: MODEL_ID
+          value: donaldrauscher/medical-scribe-vllm
+        - name: HUGGING_FACE_HUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-secret
+              key: hf_api_token
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vllm-secret
+              key: vllm_api_key
+        volumeMounts:
+        - mountPath: /dev/shm
+          name: dshm
+      volumes:
+      - name: dshm
+        emptyDir:
+            medium: Memory
+      nodeSelector:
+        cloud.google.com/gke-accelerator: nvidia-l4
+        cloud.google.com/gke-gpu-driver-version: latest
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-service
+spec:
+  selector:
+    app: vllm-server
+  type: ClusterIP
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000

@@ -1,0 +1,9 @@
+[project]
+name = "vllm-playground"
+version = "0.1.0"
+description = "Simple streamlit app to test our vllm deployment"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "streamlit==1.42.0",
+]
