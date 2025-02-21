@@ -66,7 +66,7 @@ kubectl logs -f -l app=vllm-server
 
 Set up port forwarding:
 ```
-kubectl port-forward service/llm-service 8000:8000
+kubectl port-forward service/vllm-service 8000:8000
 ```
 
 Now, in a seperate tab, let's test it out!
