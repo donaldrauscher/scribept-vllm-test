@@ -1,10 +1,11 @@
-import aiohttp, asyncio, time, os
+import aiohttp, asyncio, time, os, math
 
 import pandas as pd
 from datasets import load_dataset, Dataset
 
 
 URL = "http://localhost:8000/v1/completions"
+API_KEY = "scr1b3pt"
 
 PROMPT = """A medical scribe needs to extract documentation from a doctor/patient conversation which is included below.
 
@@ -76,13 +77,13 @@ def load_notes() -> Dataset:
     return notes
 
 
-async def send_request(session: aiohttp.ClientSession, note: str, request_id: int) -> dict:
+async def send_request(session: aiohttp.ClientSession, note: str, request_id: int, delay_between_batches: float = 0) -> dict:
     """
     Sends request to vLLM service
     """
     headers = {
         "Content-Type": "application/json",
-        "Authorization": "Bearer scr1b3pt"
+        "Authorization": f"Bearer {API_KEY}"
     }
 
     payload = {
@@ -91,6 +92,10 @@ async def send_request(session: aiohttp.ClientSession, note: str, request_id: in
         "temperature": 0.0,
         "max_tokens": 500
     }
+
+    # multiple by request_id to kick off each request at different time
+    if delay_between_batches > 0:
+        await asyncio.sleep(request_id*delay_between_batches)
 
     start_time = time.perf_counter()
     async with session.post(URL, json=payload, headers=headers) as response:
@@ -110,41 +115,51 @@ async def send_request(session: aiohttp.ClientSession, note: str, request_id: in
         }
 
 
-async def stress_test(notes: Dataset, delay_between_batches: float = 0.) -> pd.DataFrame:
+async def stress_test(notes: Dataset, delay_between_batches: float = 0) -> pd.DataFrame:
     """
     Invoke request to vLLM service for each note
+
+    If `delay_between_batches` == -1, then run in series
     """
     async with aiohttp.ClientSession() as session:
         if delay_between_batches == -1:
             results = []
             for i, note in enumerate(notes):
-                result = await send_request(session, note, i)
+                result = await send_request(session, note, i, delay_between_batches)
                 results.append(result)
         else:
-            tasks = [send_request(session, note, i) for i, note in enumerate(notes)]
-            if delay_between_batches > 0:
-                for i in range(len(notes)):
-                    await asyncio.sleep(delay_between_batches)
-            results = await asyncio.gather(*tasks)
+            results = []
+            for i, note in enumerate(notes):
+                result = send_request(session, note, i, delay_between_batches)
+                results.append(result)
+            results = await asyncio.gather(*results)
 
     return pd.DataFrame(results)
 
 
 if __name__ == "__main__":
-    notes = load_notes()['train']['text'][:100]
+    n_requests = 100
+    notes = load_notes()['train']['text']
+    if len(notes) < n_requests:
+        notes = (notes * math.ceil(n_requests/len(notes)))[:n_requests]
+    else:
+        notes = notes[:n_requests]
 
-    print(f"Running stress test 100 requests in series:")
-    df_results = asyncio.run(stress_test(notes, -1))
-    print(df_results.describe())
+    print(f"Running stress test {n_requests} requests in series:")
+    df = asyncio.run(stress_test(notes, -1))
+    print(df.describe())
 
-    print(f"Running stress test 100 requests with 0 seconds between requests:")
-    df_results = asyncio.run(stress_test(notes, 0))
-    print(df_results.describe())
+    delay = 0
+    print(f"\nRunning stress test {n_requests} requests with {delay:.1f} seconds between requests:")
+    df = asyncio.run(stress_test(notes, delay))
+    print(df.describe())
 
-    print(f"Running stress test 100 requests with 1 seconds between requests:")
-    df_results = asyncio.run(stress_test(notes, 1))
-    print(df_results.describe())
+    delay = 0.1
+    print(f"\nRunning stress test {n_requests} requests with {delay:.1f} seconds between requests:")
+    df = asyncio.run(stress_test(notes, delay))
+    print(df.describe())
 
-    print(f"Running stress test 100 requests with 2 seconds between requests:")
-    df_results = asyncio.run(stress_test(notes, 2))
-    print(df_results.describe())
+    delay = 0.2
+    print(f"\nRunning stress test {n_requests} requests with {delay:.1f} seconds between requests:")
+    df = asyncio.run(stress_test(notes, delay))
+    print(df.describe())
